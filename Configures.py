@@ -39,10 +39,7 @@ class ModelParser():
         self.cont = True 
 
     def process_args(self) -> None:
-        if torch.cuda.is_available():
-            self.device = torch.device('cuda', self.device_id)
-        else:
-            pass
+        self.device = torch.device('cpu')
 
 
 
@@ -114,6 +111,7 @@ class SynParser():
 
 data_args = DataParser()
 model_args = ModelParser()
+model_args.process_args()
 
 mcts_args = MCTSParser()
 reward_args = RewardParser()

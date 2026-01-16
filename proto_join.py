@@ -15,7 +15,7 @@ def join_prototypes_by_activations(gnnNets, p, test_loader, optimizer):
         search_batch = search_batch_input 
 
         with torch.no_grad():
-            search_batch = search_batch.cuda()
+            search_batch = search_batch.cpu()
 
             _, _, _, _, _, _, _, min_distance = gnnNets.forward(search_batch, merge=True) 
         if idx == 0:
