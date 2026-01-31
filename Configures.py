@@ -6,7 +6,7 @@ from typing import List
 class DataParser():
     def __init__(self):
         super().__init__()
-        self.dataset_name ='MUTAG'
+        self.dataset_name ='SPMotif-0.3'
         self.dataset_dir = './datasets'
         self.task = None
         self.random_split: bool = True

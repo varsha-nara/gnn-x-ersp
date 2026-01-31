@@ -125,6 +125,8 @@ def get_dataset(dataset_dir, dataset_name, task=None):
         return load_MolecueNet(dataset_dir, dataset_name, task)
     elif dataset_name.lower() in sentigraph_names:
         return load_SeniGraph(dataset_dir, dataset_name)
+    elif dataset_name.startswith('SPMotif'):
+        return load_SPMotif(dataset_dir, dataset_name)
     else:
         return load_TUDataset(f"{dataset_dir}/{dataset_name}", dataset_name) 
         # f"./checkpoint/{data_args.dataset_name}/" 
@@ -403,6 +405,63 @@ class BA2MotifDataset(InMemoryDataset):
 
         torch.save(self.collate(data_list), self.processed_paths[0])
 
+class SPMotifDataset(InMemoryDataset):
+    def __init__(self, root, name='SPMotif-0.3', split='train', transform=None, pre_transform=None):
+        self.name = name
+        self.split = split
+        super(SPMotifDataset, self).__init__(root, transform, pre_transform)
+        self.data, self.slices = torch.load(self.processed_paths[0])
+
+    @property
+    def raw_dir(self):
+        return osp.join(self.root, self.name, 'raw')
+
+    @property
+    def processed_dir(self):
+        return osp.join(self.root, self.name, 'processed')
+
+    @property
+    def raw_file_names(self):
+        return [f'{self.split}.npy']
+
+    @property
+    def processed_file_names(self):
+        return [f'{self.split}.pt']
+
+    def download(self):
+        pass
+
+    def process(self):
+        # Load the .npy file
+        data_tuple = np.load(self.raw_paths[0], allow_pickle=True)
+        edge_index_list = data_tuple[0]
+        labels = data_tuple[1]
+        node_gt_list = data_tuple[2]
+
+        data_list = []
+        MAX_DEGREE = 10  # <-- add this line at the top of the process() function
+
+        for i in range(len(edge_index_list)):
+            edge_index = torch.from_numpy(edge_index_list[i]).long()
+            y = torch.tensor([labels[i]], dtype=torch.long)
+            node_gt = torch.from_numpy(node_gt_list[i]).float()
+            
+            num_nodes = node_gt.shape[0]
+            from torch_geometric.utils import degree
+            row, col = edge_index
+            deg = degree(row, num_nodes, dtype=torch.long)
+            
+            # Clip degrees so they don't exceed MAX_DEGREE
+            deg[deg > MAX_DEGREE] = MAX_DEGREE
+            
+            x = torch.nn.functional.one_hot(deg, num_classes=MAX_DEGREE + 1).float()
+            
+            data = Data(x=x, edge_index=edge_index, y=y, ground_truth_mask=node_gt, num_nodes=num_nodes)
+            data_list.append(data)
+
+        data, slices = self.collate(data_list)
+        torch.save((data, slices), self.processed_paths[0])
+
 def load_TUDataset(dataset_dir, dataset_name):
     dataset = TUDataset(root=dataset_dir, name=dataset_name)
     return dataset
@@ -441,6 +500,13 @@ def load_MolecueNet(dataset_dir, dataset_name, task=None):
 def load_SeniGraph(dataset_dir, dataset_name):
     dataset = SentiGraphDataset(root=dataset_dir, name=dataset_name)
     return dataset
+
+
+def load_SPMotif(dataset_dir, dataset_name='SPMotif-0.3'):
+    train_dataset = SPMotifDataset(root=dataset_dir, name=dataset_name, split='train')
+    val_dataset = SPMotifDataset(root=dataset_dir, name=dataset_name, split='val')
+    test_dataset = SPMotifDataset(root=dataset_dir, name=dataset_name, split='test')
+    return (train_dataset, val_dataset, test_dataset)
 
 
 def get_dataloader(dataset, dataset_name, batch_size, random_split_flag=True, data_split_ratio=None, seed=5):
