@@ -1,0 +1,59 @@
+# Sensitive data
+config/secrets.yaml
+config/local_config.yaml
+
+# Temprorary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.cache
+.cache/
+
+# Mac users
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+.venv
+.env
+env.bak/
+venv.bak/
+
+# Code Specific
+*.pt
+*.pth
+*.ckpt
+checkpoints/*/*
+datasets/*/raw/*
+datasets/*/processed
+model_weights/
+trained_models/
+log/
+
