@@ -1,5 +1,5 @@
 # Interpretable Prototype-based Graph Information Bottleneck
-The official source code for Interpretable Prototype-based Graph Information Bottleneck at NeurIPS 2023 (https://github.com/sang-woo-seo/PGIB). The official code for the SPMotif dataset is at (https://github.com/Wuyxin/DIR-GNN/tree/main). This repository runs PGIB code on the SPMotif dataset for CPU-only configuration.
+The official source code for Interpretable Prototype-based Graph Information Bottleneck at NeurIPS 2023 (https://github.com/sang-woo-seo/PGIB). The official code for the SPMotif dataset is at (https://github.com/Wuyxin/DIR-GNN/tree/main). This repository runs the PGIB code on the SPMotif dataset with bias 0.3 for CPU-only configuration.
 
 ## Steps to run PGIB on SPMotif-0.3
 1. Clone this repository and install conda if necessary.
