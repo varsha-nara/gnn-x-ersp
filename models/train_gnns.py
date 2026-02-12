@@ -22,6 +22,28 @@ import pdb
 import random
 
 
+def supervised_contrastive_loss(embeddings, labels, temperature=0.5):
+    device = embeddings.device
+    embeddings = F.normalize(embeddings, dim=1)
+
+    similarity_matrix = torch.matmul(embeddings, embeddings.T) / temperature
+    labels = labels.contiguous().view(-1, 1)
+
+    mask = torch.eq(labels, labels.T).float().to(device)
+
+    # remove self-contrast
+    logits_mask = torch.ones_like(mask) - torch.eye(mask.shape[0]).to(device)
+    mask = mask * logits_mask
+
+    exp_sim = torch.exp(similarity_matrix) * logits_mask
+    log_prob = similarity_matrix - torch.log(exp_sim.sum(dim=1, keepdim=True) + 1e-8)
+
+    mean_log_prob_pos = (mask * log_prob).sum(dim=1) / (mask.sum(dim=1) + 1e-8)
+
+    loss = -mean_log_prob_pos.mean()
+    return loss
+
+
 def warm_only(model):
     for p in model.model.gnn_layers.parameters():
         p.requires_grad = True
@@ -44,7 +66,7 @@ def append_record(info):
 
 
 # train for graph classification
-def train_GC(model_type):
+def train_GC(model_type, stage=1):
 
     print('start loading data====================')
     dataset_tuple = get_dataset(data_args.dataset_dir, data_args.dataset_name, task=data_args.task)
@@ -77,11 +99,26 @@ def train_GC(model_type):
 
     print('start training model==================')
 
-    gnnNets = GnnNets(input_dim, output_dim, model_args)
+    if stage == 1:
+        print("Running PASS 1 (PGIB)")
+        gnnNets = GnnNets(input_dim, output_dim, model_args)
+    elif stage == 2:
+        print("Running PASS 2 (PGIB + CnC)")
+        gnnNets = GnnNets(input_dim, output_dim, model_args)
+        # Load PASS 1 checkpoint
+        ckpt_path = os.path.join(f"./checkpoint/{data_args.dataset_name}",
+            f"{model_args.model_name}_{model_type}_{model_args.readout}_best.pth")
+
+        print("Loading PASS 1 checkpoint from:", ckpt_path)
+        checkpoint = torch.load(ckpt_path)
+        gnnNets.load_state_dict(checkpoint['net'])
+
     ckpt_dir = f"./checkpoint/{data_args.dataset_name}/"
     gnnNets.to_device()
     criterion = nn.CrossEntropyLoss()
     optimizer = Adam(gnnNets.parameters(), lr=train_args.learning_rate, weight_decay=train_args.weight_decay)
+    if stage == 2:
+        optimizer = Adam(gnnNets.parameters(), lr=train_args.learning_rate * 0.5, weight_decay=train_args.weight_decay)
 
     # compute dataset stats
     avg_nodes = sum([data.x.shape[0] for data in dataset_for_stats]) / len(dataset_for_stats)
@@ -137,18 +174,11 @@ def train_GC(model_type):
             else:
                 logits, probs, active_node_index, graph_emb, KL_Loss, connectivity_loss, prototype_pred_loss, _ = gnnNets(batch)
 
-            loss = criterion(logits, batch.y)
+            classification_loss = criterion(logits, batch.y)
 
-            if model_args.cont:
-                prototypes_of_correct_class = torch.t(gnnNets.model.prototype_class_identity[:, batch.y]).to(model_args.device)
-                prototypes_of_wrong_class = 1 - prototypes_of_correct_class
-                positive_sim_matrix = sim_matrix * prototypes_of_correct_class
-                negative_sim_matrix = sim_matrix * prototypes_of_wrong_class
-                contrastive_loss = (positive_sim_matrix.sum(dim=1)) / (negative_sim_matrix.sum(dim=1))
-                contrastive_loss = - torch.log(contrastive_loss).mean()
-
-            # diversity loss
-            prototype_numbers = [int(torch.count_nonzero(gnnNets.model.prototype_class_identity[:, i])) for i in range(gnnNets.model.prototype_class_identity.shape[1])]
+            # diversity loss (optional, not added yet)
+            prototype_numbers = [int(torch.count_nonzero(gnnNets.model.prototype_class_identity[:, i])) 
+                                for i in range(gnnNets.model.prototype_class_identity.shape[1])]
             prototype_numbers = list(accumulate(prototype_numbers))
             n = 0
             ld = 0
@@ -160,10 +190,15 @@ def train_GC(model_type):
                 matrix2 = torch.zeros(matrix1.shape).to(model_args.device)
                 ld += torch.sum(torch.where(matrix1 > 0, matrix1, matrix2))
 
-            if model_args.cont:
-                loss = loss + train_args.alpha2 * contrastive_loss + model_args.con_weight*connectivity_loss + train_args.alpha1 * KL_Loss
-            else:
-                loss = loss + train_args.alpha2 * prototype_pred_loss + model_args.con_weight*connectivity_loss + train_args.alpha1 * KL_Loss
+            if stage == 1:
+                loss = (classification_loss + model_args.con_weight * connectivity_loss
+                + train_args.alpha1 * KL_Loss)
+
+            elif stage == 2:
+                cnc_loss = supervised_contrastive_loss(graph_emb, batch.y)
+
+                loss = (classification_loss + train_args.alpha_cnc * cnc_loss + model_args.con_weight * connectivity_loss
+                + train_args.alpha1 * KL_Loss)
 
             optimizer.zero_grad()
             loss.backward()
@@ -259,7 +294,7 @@ def save_best(ckpt_dir, epoch, gnnNets, model_name, eval_acc, is_best):
     best_pth_name = f'{model_name}_{model_type}_{model_args.readout}_best.pth'
     torch.save(state, os.path.join(ckpt_dir, pth_name))
     if is_best:
-        torch.save(gnnNets, os.path.join(ckpt_dir, best_pth_name))
+        torch.save(state, os.path.join(ckpt_dir, best_pth_name))
     gnnNets.to(model_args.device)
 
 
@@ -268,4 +303,12 @@ if __name__ == '__main__':
         os.remove("./log/hyper_search.txt")
 
     model_type = 'cont' if model_args.cont else 'var'
-    accuracy = train_GC(model_type)
+    print("\n========= PASS 1 =========")
+    acc_pass1 = train_GC(model_type, stage=1)
+
+    print("\n========= PASS 2 =========")
+    acc_pass2 = train_GC(model_type, stage=2)
+
+    print("Final Accuracies:")
+    print("Pass 1:", acc_pass1)
+    print("Pass 2:", acc_pass2)

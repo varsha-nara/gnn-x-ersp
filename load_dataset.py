@@ -439,7 +439,7 @@ class SPMotifDataset(InMemoryDataset):
         node_gt_list = data_tuple[2]
 
         data_list = []
-        MAX_DEGREE = 10  # <-- add this line at the top of the process() function
+        feature_dim = len(np.unique(role_ids))
 
         for i in range(len(edge_index_list)):
             edge_index = torch.from_numpy(edge_index_list[i]).long()
@@ -447,14 +447,7 @@ class SPMotifDataset(InMemoryDataset):
             node_gt = torch.from_numpy(node_gt_list[i]).float()
             
             num_nodes = node_gt.shape[0]
-            from torch_geometric.utils import degree
-            row, col = edge_index
-            deg = degree(row, num_nodes, dtype=torch.long)
-            
-            # Clip degrees so they don't exceed MAX_DEGREE
-            deg[deg > MAX_DEGREE] = MAX_DEGREE
-            
-            x = torch.nn.functional.one_hot(deg, num_classes=MAX_DEGREE + 1).float()
+            x = torch.rand(num_nodes, feature_dim)  # random node features
             
             data = Data(x=x, edge_index=edge_index, y=y, ground_truth_mask=node_gt, num_nodes=num_nodes)
             data_list.append(data)
@@ -552,14 +545,9 @@ def get_dataloader(dataset, dataset_name, batch_size, random_split_flag=True, da
 
     
     else:
-        num_train = int(data_split_ratio[0] * len(dataset))
-        num_eval = int(data_split_ratio[1] * len(dataset))
-        num_test = len(dataset) - num_train - num_eval
-
-        train, eval, test = random_split(dataset, lengths=[num_train, num_eval, num_test],
+        train, eval, test = random_split(dataset, lengths=[300, 300, 300],
                                          generator=torch.Generator().manual_seed(seed))
         # # Created using indices from 0 to train_size.
-
 
         # print(train)
     dataloader = dict()
