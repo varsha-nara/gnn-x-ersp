@@ -1,0 +1,4 @@
+pytorch==1.11.0             
+torch-geometric==2.0.4
+torch-scatter==2.0.9
+torch-sparse==0.6.13
