@@ -432,23 +432,24 @@ class SPMotifDataset(InMemoryDataset):
         pass
 
     def process(self):
-        # Load the .npy file
         data_tuple = np.load(self.raw_paths[0], allow_pickle=True)
         edge_index_list = data_tuple[0]
-        labels = data_tuple[1]
-        node_gt_list = data_tuple[2]
+        label_list      = data_tuple[1]
+        ground_truth_list = data_tuple[2]
+        role_id_list    = data_tuple[3]
+        pos_list        = data_tuple[4]
 
         data_list = []
-        feature_dim = len(np.unique(role_ids))
 
         for i in range(len(edge_index_list)):
             edge_index = torch.from_numpy(edge_index_list[i]).long()
-            y = torch.tensor([labels[i]], dtype=torch.long)
-            node_gt = torch.from_numpy(node_gt_list[i]).float()
-            
-            num_nodes = node_gt.shape[0]
-            x = torch.rand(num_nodes, feature_dim)  # random node features
-            
+            y          = torch.tensor([label_list[i]], dtype=torch.long)
+            node_gt    = torch.from_numpy(ground_truth_list[i]).float()
+            role_id    = np.array(role_id_list[i])
+            num_nodes  = len(role_id)
+
+            x = torch.ones((num_nodes, 1), dtype=torch.float)
+
             data = Data(x=x, edge_index=edge_index, y=y, ground_truth_mask=node_gt, num_nodes=num_nodes)
             data_list.append(data)
 

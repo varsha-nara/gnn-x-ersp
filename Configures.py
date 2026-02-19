@@ -90,7 +90,7 @@ class TrainParser():
         self.share = True
         self.alpha1 = 0.0001
         self.alpha2 = 0.01
-        self.alpha_cnc = 0.1
+        self.alpha_cnc = 0.01
 
 class SynParser():
     def __init__(self):

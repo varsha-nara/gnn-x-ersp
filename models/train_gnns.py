@@ -75,7 +75,7 @@ def train_GC(model_type, stage=1):
     if isinstance(dataset_tuple, tuple):
         train_dataset, val_dataset, test_dataset = dataset_tuple
         input_dim = train_dataset[0].x.shape[1]
-        output_dim = int(max([data.y.item() for data in train_dataset]) + 1)
+        output_dim = int(max([data.y.squeeze().item() for data in train_dataset]) + 1)
     else:
         dataset = dataset_tuple
         input_dim = dataset.num_node_features
@@ -111,6 +111,9 @@ def train_GC(model_type, stage=1):
 
         print("Loading PASS 1 checkpoint from:", ckpt_path)
         checkpoint = torch.load(ckpt_path)
+        # Rebuild model with the exact prototype count from checkpoint
+        model_args.num_prototypes_per_class = checkpoint['num_prototypes'] // output_dim
+        gnnNets = GnnNets(input_dim, output_dim, model_args)
         gnnNets.load_state_dict(checkpoint['net'])
 
     ckpt_dir = f"./checkpoint/{data_args.dataset_name}/"
@@ -135,7 +138,6 @@ def train_GC(model_type, stage=1):
     for epoch in range(train_args.max_epochs):
         acc = []
         loss_list = []
-        ld_loss_list = []
 
         if epoch >= train_args.proj_epochs and epoch % 50 == 0:
             gnnNets.eval()
@@ -143,7 +145,7 @@ def train_GC(model_type, stage=1):
             for i in range(gnnNets.model.prototype_vectors.shape[0]):
                 count = 0
                 best_similarity = 0
-                label = gnnNets.model.prototype_class_identity[0].max(0)[1]
+                label = gnnNets.model.prototype_class_identity[i].max(0)[1]
                 for j in range(i*10, len(data_indices)):
                     data = dataset_for_stats[data_indices[j]]
                     if data.y == label:
@@ -181,14 +183,12 @@ def train_GC(model_type, stage=1):
                                 for i in range(gnnNets.model.prototype_class_identity.shape[1])]
             prototype_numbers = list(accumulate(prototype_numbers))
             n = 0
-            ld = 0
             for k in prototype_numbers:
                 p = gnnNets.model.prototype_vectors[n:k]
                 n = k
                 p = F.normalize(p, p=2, dim=1)
                 matrix1 = torch.mm(p, torch.t(p)) - torch.eye(p.shape[0]).to(model_args.device) - 0.3
                 matrix2 = torch.zeros(matrix1.shape).to(model_args.device)
-                ld += torch.sum(torch.where(matrix1 > 0, matrix1, matrix2))
 
             if stage == 1:
                 loss = (classification_loss + model_args.con_weight * connectivity_loss
@@ -208,11 +208,10 @@ def train_GC(model_type, stage=1):
             # record
             _, prediction = torch.max(logits, -1)
             loss_list.append(loss.item())
-            ld_loss_list.append(ld.item())
             acc.append(prediction.eq(batch.y).cpu().numpy())
 
         # report train msg
-        print(f"Train Epoch:{epoch} | Loss: {np.average(loss_list):.3f} | Ld: {np.average(ld_loss_list):.3f} | Acc: {np.concatenate(acc, axis=0).mean():.3f}")
+        print(f"Train Epoch:{epoch} | Loss: {np.average(loss_list):.3f} | Acc: {np.concatenate(acc, axis=0).mean():.3f}")
         append_record(f"Epoch {epoch:2d}, loss: {np.average(loss_list):.3f}, acc: {np.concatenate(acc, axis=0).mean():.3f}")
 
         # evaluation
@@ -234,12 +233,15 @@ def train_GC(model_type, stage=1):
             break
 
         if is_best or epoch % train_args.save_epoch == 0:
-            save_best(ckpt_dir, epoch, gnnNets, model_args.model_name, eval_state['acc'], is_best)
+            save_best(ckpt_dir, epoch, gnnNets, model_args.model_name, model_type, eval_state['acc'], is_best)
 
     print(f"The best validation accuracy is {best_acc}.")
 
     # final test
-    gnnNets = torch.load(os.path.join(ckpt_dir, f'{model_args.model_name}_{model_type}_{model_args.readout}_best.pth'))
+    checkpoint = torch.load(os.path.join(ckpt_dir, f'{model_args.model_name}_{model_type}_{model_args.readout}_best.pth'))
+    model_args.num_prototypes_per_class = checkpoint['num_prototypes'] // output_dim
+    gnnNets = GnnNets(input_dim, output_dim, model_args)
+    gnnNets.load_state_dict(checkpoint['net'])
     gnnNets.to_device()
     test_state, _, _ = test_GC(test_loader, gnnNets, criterion)
     print(f"Test | Dataset: {data_args.dataset_name} | model: {model_args.model_name}_{model_type} | Loss: {test_state['loss']:.3f} | Acc: {test_state['acc']:.3f}")
@@ -287,9 +289,10 @@ def test_GC(test_dataloader, gnnNets, criterion):
     return test_state, pred_probs, predictions
 
 
-def save_best(ckpt_dir, epoch, gnnNets, model_name, eval_acc, is_best):
+def save_best(ckpt_dir, epoch, gnnNets, model_name, model_type, eval_acc, is_best):
     gnnNets.to('cpu')
-    state = {'net': gnnNets.state_dict(), 'epoch': epoch, 'acc': eval_acc}
+    state = {'net': gnnNets.state_dict(), 'epoch': epoch, 'acc': eval_acc,
+             'num_prototypes': gnnNets.model.prototype_vectors.shape[0]}
     pth_name = f"{model_name}_{model_type}_{model_args.readout}_latest.pth"
     best_pth_name = f'{model_name}_{model_type}_{model_args.readout}_best.pth'
     torch.save(state, os.path.join(ckpt_dir, pth_name))
